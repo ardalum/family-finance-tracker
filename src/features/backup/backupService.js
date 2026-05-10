@@ -119,6 +119,30 @@ function validateBackup(backup) {
     return invalid("Backup monthly budgets must be an object.");
   }
 
+  if (!data.transactions) {
+    data.transactions = [];
+  }
+
+  if (!Array.isArray(data.transactions)) {
+    return invalid("Backup transactions must be an array.");
+  }
+
+  if (!data.recurringPayments) {
+    data.recurringPayments = [];
+  }
+
+  if (!Array.isArray(data.recurringPayments)) {
+    return invalid("Backup recurring payments must be an array.");
+  }
+
+  if (!data.recurringStatusByMonth) {
+    data.recurringStatusByMonth = {};
+  }
+
+  if (typeof data.recurringStatusByMonth !== "object" || Array.isArray(data.recurringStatusByMonth)) {
+    return invalid("Backup recurring payment statuses must be an object.");
+  }
+
   const invalidCard = data.creditCards.find((card) => !isValidCreditCard(card));
   if (invalidCard) {
     return invalid("Backup contains an invalid credit card record.");
@@ -132,11 +156,100 @@ function validateBackup(backup) {
     return invalid("Backup contains invalid budget records.");
   }
 
+  if (!areTransactionsValid(data.transactions)) {
+    return invalid("Backup contains invalid transaction records.");
+  }
+
+  if (!areRecurringPaymentsValid(data.recurringPayments, data.creditCards)) {
+    return invalid("Backup contains invalid recurring payment templates.");
+  }
+
+  if (!areRecurringStatusesValid(data.recurringStatusByMonth, data.recurringPayments)) {
+    return invalid("Backup contains invalid recurring payment statuses.");
+  }
+
   return {
     ok: true,
     message: "Backup is valid.",
     data,
   };
+}
+
+function areRecurringPaymentsValid(recurringPayments, creditCards) {
+  const cardIds = new Set(creditCards.map((card) => card.id));
+
+  return recurringPayments.every((template) => {
+    if (
+      !template ||
+      typeof template !== "object" ||
+      typeof template.id !== "string" ||
+      typeof template.name !== "string" ||
+      !["fixed", "variable"].includes(template.billType) ||
+      !Number.isFinite(Number(template.estimatedAmount)) ||
+      Number(template.estimatedAmount) < 0 ||
+      !Number.isFinite(Number(template.dueDay)) ||
+      Number(template.dueDay) < 1 ||
+      Number(template.dueDay) > 31 ||
+      typeof template.paymentMethod !== "string" ||
+      typeof template.startMonth !== "string" ||
+      !/^\d{4}-\d{2}$/.test(template.startMonth) ||
+      !(template.endMonth === null || template.endMonth === "" || /^\d{4}-\d{2}$/.test(template.endMonth)) ||
+      typeof template.active !== "boolean" ||
+      typeof template.notes !== "string"
+    ) {
+      return false;
+    }
+
+    if (template.paymentMethod === "Credit Card" && template.cardId && !cardIds.has(template.cardId)) {
+      return false;
+    }
+
+    return typeof template.categoryId === "string";
+  });
+}
+
+function areRecurringStatusesValid(recurringStatusByMonth, recurringPayments) {
+  const templateIds = new Set(recurringPayments.map((template) => template.id));
+
+  return Object.entries(recurringStatusByMonth).every(([monthKey, statuses]) => {
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return false;
+    if (!statuses || typeof statuses !== "object" || Array.isArray(statuses)) return false;
+
+    return Object.entries(statuses).every(([templateId, status]) => {
+      return templateIds.has(templateId) && status === "skipped";
+    });
+  });
+}
+
+function areTransactionsValid(transactions) {
+  return transactions.every((transaction) => {
+    if (
+      !transaction ||
+      typeof transaction !== "object" ||
+      typeof transaction.id !== "string" ||
+      typeof transaction.date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(transaction.date) ||
+      typeof transaction.merchant !== "string" ||
+      typeof transaction.cardId !== "string" ||
+      !Number.isFinite(Number(transaction.amount)) ||
+      Number(transaction.amount) < 0 ||
+      typeof transaction.notes !== "string" ||
+      !Array.isArray(transaction.splits)
+    ) {
+      return false;
+    }
+
+    return transaction.splits.every((split) => {
+      return (
+        split &&
+        typeof split === "object" &&
+        typeof split.id === "string" &&
+        typeof split.categoryId === "string" &&
+        Number.isFinite(Number(split.amount)) &&
+        Number(split.amount) >= 0
+      );
+    });
+  });
 }
 
 function areBudgetsValid(budgetsByMonth) {

@@ -1,0 +1,292 @@
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import Button from "../../../components/ui/Button.jsx";
+import Input from "../../../components/ui/Input.jsx";
+import Select from "../../../components/ui/Select.jsx";
+import { addTransaction, getSplitTotal, UNCATEGORIZED_ID, updateTransaction } from "../spendingService.js";
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function defaultDateForMonth(monthKey) {
+  const today = new Date();
+  const currentMonthKey = todayDate().slice(0, 7);
+  if (monthKey === currentMonthKey) return todayDate();
+  return `${monthKey}-01`;
+}
+
+const emptyForm = {
+  date: todayDate(),
+  merchant: "",
+  paymentMethod: "Credit Card",
+  cardId: "",
+  amount: "",
+  notes: "",
+  source: "manual",
+  recurringPaymentId: null,
+  recurringMonth: null,
+  splits: [{ id: "split_initial", categoryId: UNCATEGORIZED_ID, amount: "" }],
+};
+
+export default function TransactionForm({
+  monthKey,
+  cards,
+  categories,
+  editingTransaction,
+  onCancel,
+  onSaved,
+}) {
+  const [form, setForm] = useState(emptyForm);
+  const [error, setError] = useState("");
+  const categoryOptions = useMemo(
+    () => [{ id: UNCATEGORIZED_ID, name: "Uncategorized" }, ...categories],
+    [categories],
+  );
+
+  useEffect(() => {
+    setError("");
+    setForm(
+      editingTransaction
+        ? {
+            date: editingTransaction.date,
+            merchant: editingTransaction.merchant,
+            paymentMethod: editingTransaction.paymentMethod || "Credit Card",
+            cardId: editingTransaction.cardId,
+            amount: String(editingTransaction.amount),
+            notes: editingTransaction.notes ?? "",
+            source: editingTransaction.source || "manual",
+            recurringPaymentId: editingTransaction.recurringPaymentId || null,
+            recurringMonth: editingTransaction.recurringMonth || null,
+            splits: editingTransaction.splits.map((split) => ({
+              ...split,
+              amount: String(split.amount),
+            })),
+          }
+        : {
+            ...emptyForm,
+            date: defaultDateForMonth(monthKey),
+          },
+    );
+  }, [editingTransaction, monthKey]);
+
+  function updateField(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "paymentMethod" && value !== "Credit Card" ? { cardId: "" } : {}),
+    }));
+  }
+
+  function updateSplit(splitId, field, value) {
+    setForm((current) => ({
+      ...current,
+      splits: current.splits.map((split) =>
+        split.id === splitId ? { ...split, [field]: value } : split,
+      ),
+    }));
+  }
+
+  function addSplit() {
+    setForm((current) => ({
+      ...current,
+      splits: [
+        ...current.splits,
+        { id: crypto.randomUUID(), categoryId: UNCATEGORIZED_ID, amount: "" },
+      ],
+    }));
+  }
+
+  function removeSplit(splitId) {
+    setForm((current) => ({
+      ...current,
+      splits: current.splits.filter((split) => split.id !== splitId),
+    }));
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const validationError = validateForm(form, cards);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const nextData = editingTransaction
+      ? updateTransaction(editingTransaction.id, form)
+      : addTransaction(form);
+    onSaved(nextData);
+    setForm(emptyForm);
+  }
+
+  return (
+    <form className="grid gap-4" onSubmit={handleSubmit}>
+      <div>
+        <h3 className="text-base font-semibold text-gray-950">
+          {editingTransaction ? "Edit transaction" : "Add transaction"}
+        </h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Split amounts must match the transaction total.
+        </p>
+      </div>
+
+      {categories.length === 0 ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          No budget categories exist for this month. Create budget categories first, or use
+          Uncategorized.
+        </div>
+      ) : null}
+
+      {cards.length === 0 ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          Add a credit card before adding transactions.
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      <Input
+        label="Date"
+        type="date"
+        value={form.date}
+        onChange={(event) => updateField("date", event.target.value)}
+        required
+      />
+      <Input
+        label="Store or merchant"
+        value={form.merchant}
+        onChange={(event) => updateField("merchant", event.target.value)}
+        required
+      />
+      <Select
+        label="Payment method"
+        value={form.paymentMethod}
+        onChange={(event) => updateField("paymentMethod", event.target.value)}
+        required
+      >
+        <option>Credit Card</option>
+        <option>Checking Account</option>
+        <option>Savings Account</option>
+        <option>Cash</option>
+        <option>Other</option>
+      </Select>
+      {form.paymentMethod === "Credit Card" ? (
+        <Select
+          label="Card used"
+          value={form.cardId}
+          onChange={(event) => updateField("cardId", event.target.value)}
+          required
+        >
+          <option value="" disabled>
+            Select card
+          </option>
+          {cards.map((card) => (
+            <option key={card.id} value={card.id}>
+              {card.name}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+      <Input
+        label="Amount"
+        type="number"
+        min="0"
+        step="0.01"
+        value={form.amount}
+        onChange={(event) => updateField("amount", event.target.value)}
+        required
+      />
+
+      <div className="grid gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-gray-950">Category split</p>
+          <Button type="button" variant="secondary" className="min-h-9 px-3 py-1" onClick={addSplit}>
+            <Plus size={15} aria-hidden="true" />
+            Add split
+          </Button>
+        </div>
+        {form.splits.map((split) => (
+          <div key={split.id} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px_auto]">
+            <Select
+              label="Category"
+              value={split.categoryId}
+              onChange={(event) => updateSplit(split.id, "categoryId", event.target.value)}
+            >
+              {categoryOptions.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </Select>
+            <Input
+              label="Amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={split.amount}
+              onChange={(event) => updateSplit(split.id, "amount", event.target.value)}
+            />
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="danger"
+                className="min-h-10 px-3"
+                onClick={() => removeSplit(split.id)}
+                disabled={form.splits.length === 1}
+                aria-label="Remove split"
+              >
+                <Trash2 size={16} aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+        ))}
+        <p className="text-xs text-gray-500">
+          Split total: ${getSplitTotal(form.splits).toFixed(2)}
+        </p>
+      </div>
+
+      <label className="grid min-w-0 gap-1.5 text-sm font-medium text-gray-700">
+        Notes
+        <textarea
+          className="min-h-20 w-full min-w-0 resize-y rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+          value={form.notes}
+          onChange={(event) => updateField("notes", event.target.value)}
+          placeholder="Optional"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-3">
+        <Button type="submit">{editingTransaction ? "Save transaction" : "Add transaction"}</Button>
+        {editingTransaction ? (
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+function validateForm(form, cards) {
+  if (!form.date) return "Date is required.";
+  if (!form.merchant.trim()) return "Store or merchant is required.";
+  if (form.paymentMethod === "Credit Card" && !form.cardId) return "Card used is required.";
+  if (form.paymentMethod === "Credit Card" && !cards.some((card) => card.id === form.cardId)) return "Select a valid card.";
+  if (Number(form.amount) <= 0) return "Amount must be greater than zero.";
+  if (form.splits.length === 0) return "At least one category split is required.";
+  if (form.splits.some((split) => Number(split.amount) < 0)) {
+    return "Split amounts cannot be negative.";
+  }
+
+  const amount = Math.round(Number(form.amount) * 100);
+  const splitTotal = Math.round(getSplitTotal(form.splits) * 100);
+  if (amount !== splitTotal) {
+    return "Split amounts must equal the total transaction amount.";
+  }
+
+  return "";
+}

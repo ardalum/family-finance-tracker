@@ -1,6 +1,11 @@
-import { CreditCard, DatabaseBackup, WalletCards } from "lucide-react";
+import { CalendarSync, CreditCard, DatabaseBackup, LayoutDashboard, ReceiptText, WalletCards } from "lucide-react";
 
 const navItems = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+  },
   {
     id: "credit-cards",
     label: "Credit Card Tracker",
@@ -10,6 +15,16 @@ const navItems = [
     id: "budgets",
     label: "Budget Tracker",
     icon: WalletCards,
+  },
+  {
+    id: "spending",
+    label: "Spending Tracker",
+    icon: ReceiptText,
+  },
+  {
+    id: "recurring",
+    label: "Recurring Payments",
+    icon: CalendarSync,
   },
   {
     id: "backup",

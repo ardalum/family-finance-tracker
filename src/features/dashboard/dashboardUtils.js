@@ -1,0 +1,186 @@
+import { daysBetween, getDueDateForMonth } from "../../lib/dates.js";
+import { getOwnerCreditLimitTotal } from "../creditCards/creditCardsService.js";
+import {
+  getCategoryName,
+  getMonthTransactions,
+  getTotalSpending,
+  UNCATEGORIZED_ID,
+  UNCATEGORIZED_NAME,
+} from "../spending/spendingService.js";
+import {
+  getEligibleRecurringPayments,
+  getRecurringStatus,
+  getRecurringSummary,
+} from "../recurring/recurringService.js";
+
+export function getDashboardData(appData, monthKey) {
+  const cards = appData.creditCards.filter((card) => card.isActive);
+  const budgets = appData.budgetsByMonth[monthKey] ?? [];
+  const transactions = getMonthTransactions(appData.transactions, monthKey);
+  const monthlyBalances = appData.monthlyBalances[monthKey] ?? {};
+  const budgetTotal = budgets.reduce((sum, budget) => sum + Number(budget.monthlyAmount || 0), 0);
+  const spendingTotal = getTotalSpending(transactions);
+  const statementBalanceTotal = cards.reduce(
+    (sum, card) => sum + Number(monthlyBalances[card.id]?.balance || 0),
+    0,
+  );
+  const unpaidBalanceTotal = cards.reduce((sum, card) => {
+    const entry = monthlyBalances[card.id] ?? { balance: 0, paid: false };
+    return entry.paid ? sum : sum + Number(entry.balance || 0);
+  }, 0);
+  const recurringSummary = getRecurringSummary(appData.recurringPayments, monthKey, appData.transactions);
+
+  return {
+    cards,
+    budgets,
+    transactions,
+    monthlyBalances,
+    recurringSummary,
+    summary: {
+      budgetTotal,
+      spendingTotal,
+      remainingBudget: budgetTotal - spendingTotal,
+      recurringEstimate: recurringSummary.estimatedTotal,
+      recurringActual: recurringSummary.actualTotal,
+      totalCreditLimit:
+        getOwnerCreditLimitTotal(cards, "Arvin") + getOwnerCreditLimitTotal(cards, "Kristine"),
+      statementBalanceTotal,
+      unpaidBalanceTotal,
+    },
+    budgetRows: getBudgetRows(budgets, transactions),
+    cardRows: getCardRows(cards, monthlyBalances, monthKey),
+    recurringRows: getRecurringRows(
+      appData.recurringPayments,
+      monthKey,
+      appData.transactions,
+      appData.recurringStatusByMonth,
+    ),
+    recentTransactions: getRecentTransactions(transactions),
+    chartData: {
+      spendingByCategory: getSpendingByCategory(transactions, budgets),
+      budgetVsSpending: getBudgetRows(budgets, transactions),
+      monthlyTrend: getMonthlyTrend(appData.transactions),
+    },
+  };
+}
+
+export function getAlerts(data) {
+  const alerts = [];
+
+  data.budgetRows.forEach((row) => {
+    if (row.remaining < 0) {
+      alerts.push({ type: "danger", text: `${row.category} is over budget by ${Math.abs(row.remaining).toFixed(2)}.` });
+    } else if (row.percentUsed >= 90) {
+      alerts.push({ type: "warning", text: `${row.category} has used ${row.percentUsed.toFixed(0)}% of its budget.` });
+    }
+  });
+
+  data.cardRows.forEach((row) => {
+    if (!row.paid && row.daysUntilDue < 0) {
+      alerts.push({ type: "danger", text: `${row.card.name} is past due with an unpaid balance.` });
+    } else if (!row.paid && row.daysUntilDue <= 7) {
+      alerts.push({ type: "warning", text: `${row.card.name} is due within 7 days.` });
+    }
+  });
+
+  data.recurringRows.forEach((row) => {
+    if (row.status !== "Generated" && row.daysUntilDue < 0) {
+      alerts.push({ type: "danger", text: `${row.template.name} is past due and not generated.` });
+    } else if (row.status !== "Generated" && row.daysUntilDue <= 7) {
+      alerts.push({ type: "warning", text: `${row.template.name} is due within 7 days and not generated.` });
+    }
+    if (row.template.billType === "variable" && row.status === "Not generated") {
+      alerts.push({ type: "warning", text: `${row.template.name} needs an actual variable amount.` });
+    }
+  });
+
+  if (data.summary.spendingTotal > data.summary.budgetTotal && data.summary.budgetTotal > 0) {
+    alerts.push({ type: "danger", text: "Total spending is higher than total budget." });
+  }
+
+  return alerts;
+}
+
+function getBudgetRows(budgets, transactions) {
+  return budgets.map((budget) => {
+    const spent = transactions.reduce((sum, transaction) => {
+      return (
+        sum +
+        transaction.splits
+          .filter((split) => split.categoryId === budget.id)
+          .reduce((splitSum, split) => splitSum + Number(split.amount || 0), 0)
+      );
+    }, 0);
+    const amount = Number(budget.monthlyAmount || 0);
+
+    return {
+      category: budget.name,
+      budget: amount,
+      spent,
+      remaining: amount - spent,
+      percentUsed: amount > 0 ? (spent / amount) * 100 : 0,
+    };
+  });
+}
+
+function getCardRows(cards, monthlyBalances, monthKey) {
+  return cards
+    .map((card) => {
+      const dueDate = getDueDateForMonth(monthKey, card.dueDay);
+      const entry = monthlyBalances[card.id] ?? { balance: 0, paid: false };
+      return {
+        card,
+        balance: Number(entry.balance || 0),
+        paid: Boolean(entry.paid),
+        daysUntilDue: daysBetween(new Date(), dueDate),
+      };
+    })
+    .sort((a, b) => {
+      if (a.paid !== b.paid) return a.paid ? 1 : -1;
+      return a.daysUntilDue - b.daysUntilDue;
+    });
+}
+
+function getRecurringRows(templates, monthKey, transactions, statusByMonth) {
+  return getEligibleRecurringPayments(templates, monthKey)
+    .map((template) => ({
+      template,
+      status: getRecurringStatus(template, monthKey, transactions, statusByMonth),
+      daysUntilDue: daysBetween(new Date(), getDueDateForMonth(monthKey, template.dueDay)),
+    }))
+    .sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+}
+
+function getRecentTransactions(transactions) {
+  return [...transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+}
+
+function getSpendingByCategory(transactions, budgets) {
+  const totals = new Map();
+
+  transactions.forEach((transaction) => {
+    transaction.splits.forEach((split) => {
+      const name = split.categoryId === UNCATEGORIZED_ID
+        ? UNCATEGORIZED_NAME
+        : getCategoryName(split.categoryId, budgets);
+      totals.set(name, (totals.get(name) ?? 0) + Number(split.amount || 0));
+    });
+  });
+
+  return Array.from(totals.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function getMonthlyTrend(transactions) {
+  const totals = new Map();
+  transactions.forEach((transaction) => {
+    const month = transaction.date.slice(0, 7);
+    totals.set(month, (totals.get(month) ?? 0) + Number(transaction.amount || 0));
+  });
+
+  return Array.from(totals.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-6)
+    .map(([month, total]) => ({ month, total }));
+}

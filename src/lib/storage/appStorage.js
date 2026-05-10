@@ -10,6 +10,9 @@ const emptyData = {
   creditCards: [],
   monthlyBalances: {},
   budgetsByMonth: {},
+  transactions: [],
+  recurringPayments: [],
+  recurringStatusByMonth: {},
 };
 
 function nowIso() {
@@ -35,6 +38,12 @@ function normalizeData(value) {
     budgetsByMonth:
       value?.budgetsByMonth && typeof value.budgetsByMonth === "object"
         ? value.budgetsByMonth
+        : {},
+    transactions: Array.isArray(value?.transactions) ? value.transactions : [],
+    recurringPayments: Array.isArray(value?.recurringPayments) ? value.recurringPayments : [],
+    recurringStatusByMonth:
+      value?.recurringStatusByMonth && typeof value.recurringStatusByMonth === "object"
+        ? value.recurringStatusByMonth
         : {},
   };
 }
