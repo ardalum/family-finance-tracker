@@ -1,50 +1,54 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import AppShell from "../components/layout/AppShell.jsx";
-import Card from "../components/ui/Card.jsx";
-import CreditCardForm from "../features/creditCards/components/CreditCardForm.jsx";
-import CreditCardList from "../features/creditCards/components/CreditCardList.jsx";
-import CreditLimitSummary from "../features/creditCards/components/CreditLimitSummary.jsx";
-import MonthlyBalanceGraph from "../features/creditCards/components/MonthlyBalanceGraph.jsx";
-import MonthlyBalanceTable from "../features/creditCards/components/MonthlyBalanceTable.jsx";
+import BackupRestore from "../features/backup/components/BackupRestore.jsx";
+import BudgetTracker from "../features/budgets/components/BudgetTracker.jsx";
+import CreditCardTracker from "../features/creditCards/components/CreditCardTracker.jsx";
 import { readAppData } from "../lib/storage/appStorage.js";
+
+const pageContent = {
+  "credit-cards": {
+    title: "Credit Card Tracker",
+    description: "Manage cards, monthly balances, due dates, and statement status.",
+  },
+  budgets: {
+    title: "Budget Tracker",
+    description: "Plan monthly budget categories without spending calculations yet.",
+  },
+  backup: {
+    title: "Backup / Restore",
+    description: "Export, import, or reset the local data saved in this browser.",
+  },
+};
 
 export default function App() {
   const [appData, setAppData] = useState(() => readAppData());
-  const [editingCard, setEditingCard] = useState(null);
-
-  const activeCards = useMemo(
-    () => appData.creditCards.filter((card) => card.isActive),
-    [appData.creditCards],
-  );
+  const [activeView, setActiveView] = useState("credit-cards");
+  const currentPage = pageContent[activeView];
 
   function refreshData(nextData) {
     setAppData(nextData ?? readAppData());
-    setEditingCard(null);
   }
 
   return (
-    <AppShell>
-      <CreditLimitSummary cards={activeCards} />
+    <AppShell
+      activeView={activeView}
+      onViewChange={setActiveView}
+      pageTitle={currentPage.title}
+      pageDescription={currentPage.description}
+    >
+      {activeView === "credit-cards" ? (
+        <CreditCardTracker
+          creditCards={appData.creditCards}
+          monthlyBalances={appData.monthlyBalances}
+          onDataChange={refreshData}
+        />
+      ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="grid gap-6">
-          <MonthlyBalanceTable
-            cards={activeCards}
-            monthlyBalances={appData.monthlyBalances}
-            onDataChange={refreshData}
-          />
-          <MonthlyBalanceGraph monthlyBalances={appData.monthlyBalances} />
-          <CreditCardList
-            cards={activeCards}
-            onEdit={setEditingCard}
-            onDataChange={refreshData}
-          />
-        </div>
+      {activeView === "budgets" ? (
+        <BudgetTracker budgetsByMonth={appData.budgetsByMonth} onDataChange={refreshData} />
+      ) : null}
 
-        <Card className="h-fit p-5">
-          <CreditCardForm editingCard={editingCard} onCancel={() => setEditingCard(null)} onSaved={refreshData} />
-        </Card>
-      </div>
+      {activeView === "backup" ? <BackupRestore onDataChange={refreshData} /> : null}
     </AppShell>
   );
 }

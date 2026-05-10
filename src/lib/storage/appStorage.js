@@ -9,6 +9,7 @@ const emptyData = {
   },
   creditCards: [],
   monthlyBalances: {},
+  budgetsByMonth: {},
 };
 
 function nowIso() {
@@ -30,6 +31,10 @@ function normalizeData(value) {
     monthlyBalances:
       value?.monthlyBalances && typeof value.monthlyBalances === "object"
         ? value.monthlyBalances
+        : {},
+    budgetsByMonth:
+      value?.budgetsByMonth && typeof value.budgetsByMonth === "object"
+        ? value.budgetsByMonth
         : {},
   };
 }
@@ -61,3 +66,10 @@ export function updateAppData(updater) {
   const current = readAppData();
   return writeAppData(updater(current));
 }
+
+export function resetAppData() {
+  window.localStorage.removeItem(STORAGE_KEY);
+  return readAppData();
+}
+
+export { STORAGE_KEY };
